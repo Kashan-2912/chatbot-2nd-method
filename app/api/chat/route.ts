@@ -35,8 +35,8 @@ If the information is not in the knowledge base, politely say so and offer to he
 
     prompt += `User Question: ${message}`;
 
-    // Call Gemini API with Gemini 2.5 Flash
-    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-preview:generateContent?key=${apiKey}`, {
+    // Call Gemini API - using gemini-2.0-flash which is widely available
+    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -62,7 +62,30 @@ If the information is not in the knowledge base, politely say so and offer to he
     }
 
     const data = await response.json();
-    const assistantMessage = data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response generated';
+    console.log('Gemini response:', JSON.stringify(data, null, 2));
+    
+    // Handle different response structures
+    let assistantMessage = 'No response generated';
+    
+    if (data.candidates && data.candidates.length > 0) {
+      const candidate = data.candidates[0];
+      
+      // Check for safety block
+      if (candidate.finishReason === 'SAFETY') {
+        assistantMessage = 'I apologize, but I cannot respond to this query due to safety guidelines.';
+      } else if (candidate.content?.parts?.[0]?.text) {
+        assistantMessage = candidate.content.parts[0].text;
+      } else if (candidate.text) {
+        assistantMessage = candidate.text;
+      }
+    } else if (data.text) {
+      assistantMessage = data.text;
+    } else if (data.error) {
+      return NextResponse.json(
+        { error: `Gemini API error: ${data.error.message || 'Unknown error'}` },
+        { status: 500 }
+      );
+    }
 
     return NextResponse.json({
       message: assistantMessage,
