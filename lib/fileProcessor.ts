@@ -169,31 +169,47 @@ export const processFile = async (file: File): Promise<string> => {
 
 // Split text into overlapping chunks
 export const chunkText = (text: string, chunkSize: number = CHUNK_SIZE, overlap: number = CHUNK_OVERLAP): string[] => {
+  // Handle empty or very short text
+  if (!text || text.length === 0) {
+    return [];
+  }
+  
+  if (text.length <= chunkSize) {
+    return [text.trim()].filter(chunk => chunk.length > 0);
+  }
+
   const chunks: string[] = [];
   let start = 0;
+  let iterations = 0;
+  const maxIterations = Math.ceil(text.length / (chunkSize - overlap)) + 10; // Safety limit
 
-  while (start < text.length) {
+  while (start < text.length && iterations < maxIterations) {
+    iterations++;
     const end = Math.min(start + chunkSize, text.length);
     let chunk = text.slice(start, end);
 
     // Try to end at a sentence boundary
-    if (end < text.length) {
+    if (end < text.length && chunk.length > 100) {
       const lastPeriod = chunk.lastIndexOf('.');
       const lastNewline = chunk.lastIndexOf('\n');
       const lastBreak = Math.max(lastPeriod, lastNewline);
 
-      if (lastBreak > chunkSize * 0.5) {
+      if (lastBreak > chunk.length * 0.5) {
         chunk = chunk.slice(0, lastBreak + 1);
       }
     }
 
-    chunks.push(chunk.trim());
-    start += chunk.length - overlap;
-
-    if (start >= text.length) break;
+    const trimmedChunk = chunk.trim();
+    if (trimmedChunk.length > 0) {
+      chunks.push(trimmedChunk);
+    }
+    
+    // Ensure we always make forward progress
+    const progress = Math.max(chunk.length - overlap, 1);
+    start += progress;
   }
 
-  return chunks.filter(chunk => chunk.length > 0);
+  return chunks;
 };
 
 // Process file and create knowledge chunks
