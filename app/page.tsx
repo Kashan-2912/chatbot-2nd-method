@@ -10,7 +10,6 @@ import {
   getChatHistory,
   clearChatHistory,
   ChatMessage,
-  KnowledgeChunk
 } from '@/lib/indexedDB';
 import { createKnowledgeChunks } from '@/lib/fileProcessor';
 
