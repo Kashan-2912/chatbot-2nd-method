@@ -171,7 +171,7 @@ export default function Home() {
             <input
               type="file"
               multiple
-              accept=".txt,.md,.json,.csv,text/*"
+              accept="*/*"
               onChange={handleFileUpload}
               className="w-full text-sm mb-2"
             />

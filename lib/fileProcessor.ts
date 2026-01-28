@@ -5,22 +5,165 @@ import { KnowledgeChunk } from './indexedDB';
 const CHUNK_SIZE = 1000;
 const CHUNK_OVERLAP = 200;
 
+// Get file extension
+const getFileExtension = (fileName: string): string => {
+  const parts = fileName.toLowerCase().split('.');
+  return parts.length > 1 ? parts[parts.length - 1] : '';
+};
+
+// Check if file is binary (images, videos, etc. that can't be read as text)
+const isBinaryFile = (fileName: string): boolean => {
+  const binaryExtensions = [
+    'png', 'jpg', 'jpeg', 'gif', 'bmp', 'ico', 'webp', 'svg',
+    'mp3', 'mp4', 'avi', 'mov', 'wav', 'ogg', 'webm',
+    'zip', 'rar', '7z', 'tar', 'gz',
+    'exe', 'dll', 'so', 'bin',
+    'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx'
+  ];
+  const ext = getFileExtension(fileName);
+  return binaryExtensions.includes(ext);
+};
+
+// Extract text from PDF using pdf.js-like approach (basic text extraction)
+const extractPDFText = async (file: File): Promise<string> => {
+  const arrayBuffer = await file.arrayBuffer();
+  const bytes = new Uint8Array(arrayBuffer);
+  
+  // Convert to string and look for text content
+  let text = '';
+  const decoder = new TextDecoder('utf-8', { fatal: false });
+  const rawText = decoder.decode(bytes);
+  
+  // Extract text between BT and ET markers (PDF text objects)
+  const textMatches = rawText.match(/\((.*?)\)/g);
+  if (textMatches) {
+    text = textMatches
+      .map(match => match.slice(1, -1))
+      .filter(t => t.length > 0 && /[a-zA-Z0-9]/.test(t))
+      .join(' ');
+  }
+  
+  // If no text found, try to extract any readable content
+  if (text.length < 50) {
+    text = rawText.replace(/[^\x20-\x7E\n]/g, ' ').replace(/\s+/g, ' ').trim();
+  }
+  
+  return text || `[PDF file: ${file.name} - Text extraction limited. Consider using a text-based format for better results.]`;
+};
+
+// Extract text from Word documents (basic extraction)
+const extractDocxText = async (file: File): Promise<string> => {
+  const arrayBuffer = await file.arrayBuffer();
+  const bytes = new Uint8Array(arrayBuffer);
+  const decoder = new TextDecoder('utf-8', { fatal: false });
+  const rawText = decoder.decode(bytes);
+  
+  // Try to extract text content from XML
+  const textMatches = rawText.match(/<w:t[^>]*>([^<]*)<\/w:t>/g);
+  if (textMatches) {
+    return textMatches
+      .map(match => match.replace(/<[^>]*>/g, ''))
+      .join(' ');
+  }
+  
+  return `[Word document: ${file.name} - Text extraction limited. Consider saving as .txt for better results.]`;
+};
+
 // Parse file content based on type
 export const processFile = async (file: File): Promise<string> => {
   const fileType = file.type;
   const fileName = file.name.toLowerCase();
+  const ext = getFileExtension(fileName);
 
-  if (fileType.startsWith('text/') || fileName.endsWith('.txt') || fileName.endsWith('.md')) {
-    return await file.text();
-  } else if (fileName.endsWith('.json')) {
-    const text = await file.text();
-    const json = JSON.parse(text);
-    return JSON.stringify(json, null, 2);
-  } else if (fileName.endsWith('.csv')) {
-    return await file.text();
-  } else {
-    // Try to read as text for other types
-    return await file.text();
+  try {
+    // Text-based files
+    if (fileType.startsWith('text/') || 
+        ['txt', 'md', 'markdown', 'rst', 'log'].includes(ext)) {
+      return await file.text();
+    }
+    
+    // JSON files
+    if (ext === 'json' || fileType === 'application/json') {
+      const text = await file.text();
+      try {
+        const json = JSON.parse(text);
+        return JSON.stringify(json, null, 2);
+      } catch {
+        return text;
+      }
+    }
+    
+    // CSV/TSV files
+    if (['csv', 'tsv'].includes(ext)) {
+      return await file.text();
+    }
+    
+    // Code files
+    if (['js', 'ts', 'jsx', 'tsx', 'py', 'java', 'c', 'cpp', 'h', 'hpp', 
+         'cs', 'go', 'rs', 'rb', 'php', 'swift', 'kt', 'scala', 'r',
+         'html', 'htm', 'css', 'scss', 'sass', 'less',
+         'xml', 'yaml', 'yml', 'toml', 'ini', 'cfg', 'conf',
+         'sh', 'bash', 'zsh', 'ps1', 'bat', 'cmd',
+         'sql', 'graphql', 'gql'].includes(ext)) {
+      return await file.text();
+    }
+    
+    // PDF files
+    if (ext === 'pdf' || fileType === 'application/pdf') {
+      return await extractPDFText(file);
+    }
+    
+    // Word documents
+    if (['doc', 'docx'].includes(ext) || 
+        fileType.includes('word') || 
+        fileType.includes('document')) {
+      return await extractDocxText(file);
+    }
+    
+    // Excel/Spreadsheet (basic extraction)
+    if (['xls', 'xlsx'].includes(ext) || fileType.includes('spreadsheet')) {
+      const arrayBuffer = await file.arrayBuffer();
+      const decoder = new TextDecoder('utf-8', { fatal: false });
+      const rawText = decoder.decode(new Uint8Array(arrayBuffer));
+      const textMatches = rawText.match(/<t[^>]*>([^<]*)<\/t>/g);
+      if (textMatches) {
+        return textMatches.map(m => m.replace(/<[^>]*>/g, '')).join(' | ');
+      }
+      return `[Excel file: ${file.name}]`;
+    }
+    
+    // RTF files
+    if (ext === 'rtf') {
+      const text = await file.text();
+      return text.replace(/\{[^}]*\}/g, '').replace(/\\[a-z]+\d*/g, ' ').trim();
+    }
+    
+    // Image files - just store metadata
+    if (['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp', 'svg'].includes(ext)) {
+      return `[Image file: ${file.name}, Size: ${(file.size / 1024).toFixed(2)} KB, Type: ${file.type}]`;
+    }
+    
+    // Audio/Video files - just store metadata  
+    if (['mp3', 'mp4', 'avi', 'mov', 'wav', 'ogg', 'webm'].includes(ext)) {
+      return `[Media file: ${file.name}, Size: ${(file.size / 1024 / 1024).toFixed(2)} MB, Type: ${file.type}]`;
+    }
+    
+    // Try to read as text for any other file
+    try {
+      const text = await file.text();
+      // Check if it's mostly readable text
+      const readableChars = text.replace(/[^\x20-\x7E\n\r\t]/g, '');
+      if (readableChars.length > text.length * 0.7) {
+        return text;
+      }
+      return `[File: ${file.name}]\n${readableChars.slice(0, 5000)}`;
+    } catch {
+      return `[Binary file: ${file.name}, Size: ${(file.size / 1024).toFixed(2)} KB, Type: ${file.type || 'unknown'}]`;
+    }
+    
+  } catch (error) {
+    console.error('Error processing file:', file.name, error);
+    return `[File: ${file.name} - Could not extract content]`;
   }
 };
 
